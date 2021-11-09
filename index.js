@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 const cors =require('cors');
+const admin = require("firebase-admin");
 const { MongoClient } = require('mongodb');
 const port = process.env.PORT || 5000;
 require ('dotenv').config();
@@ -8,9 +9,30 @@ require ('dotenv').config();
 app.use(cors());
 app.use(express.json());
 
+const serviceAccount = require('./doctors-portal-sdk.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.jo3sa.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+
+async function verifyToken (req, res, next){
+  if(req.headers?.authorization?.startsWith('Bearer ')){
+    const token = req.headers.authorization.split(' ')[1];
+
+    try{
+      const decoderUser = await admin.auth().verifyIdToken(token);
+      req.decodedEmail = decoderUser.email;
+
+    }
+    catch{
+
+    }
+  }
+  next();
+}
 
 async function run(){
     try{
@@ -20,7 +42,7 @@ async function run(){
       const usersCollection = database.collection('users');
 
 
-        app.get('/appointments', async (req, res) =>{
+        app.get('/appointments', verifyToken, async (req, res) =>{
         const email = req.query.email;
         const date = new Date(req.query.date).toLocaleDateString();
         const query = {email: email, date: date}
@@ -35,10 +57,20 @@ async function run(){
         res.json(result);
       });
 
+      app.get('/users/:email', async(req, res) =>{
+        const email = req.params.email;
+        const query= {email: email};
+        const user = await usersCollection.findOne(query);
+        let isAdmin = false;
+        if(user?.role === 'admin'){
+          isAdmin = true;
+        }
+        res.json({admin : isAdmin});
+      })
+
       app.post('/users', async(req, res) =>{
         const user = req.body;
         const result = await usersCollection.insertOne(user);
-        console.log(result);
         res.json(result);
       });
 
@@ -49,9 +81,24 @@ async function run(){
         const updateDoc = {$set: user};
         const result = usersCollection.updateOne(filter, updateDoc, options);
         res.json(result);
+      });
 
+      app.put('/users/admin', verifyToken,  async(req, res) =>{
+        const user = req.body;
+        const reqester = req.decodedEmail;
+        if(requester){
+          const requesterAccount = usersCollection.findOne({email: requester});
+          if(requesterAccount.role === 'admin'){
+            const filter = {email: user.email};
+            const updateDoc = {$set: {role: 'admin'}};
+            const result = await usersCollection.updateOne(filter, updateDoc);
+            res.json(result);
+          }
+        }
+        else{
+          res.status(403).json({message: 'You do not have access to admin'})
+        }
       })
-
       }
     finally{
         // await client.close();

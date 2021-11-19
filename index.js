@@ -7,10 +7,11 @@ const port = process.env.PORT || 5000;
 require ('dotenv').config();
 const ObjectId = require('mongodb').ObjectId;
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
-const fileUpload = 
+const fileUpload = require('express-fileupload');
 
 app.use(cors());
 app.use(express.json());
+app.use(fileUpload());
 
 const serviceAccount = require('./doctors-portal-sdk.json');
 
@@ -82,8 +83,26 @@ async function run(){
         res.json(result);
       });
 
-      app.post('/doctors', async(req, res)=>{
+      app.get('/doctors', async (req, res)=>{
+        const cursor = doctorsCollection.find({});
+        const doctors = await cursor.toArray();
+        res.json(doctors);
+      })
 
+      app.post('/doctors', async (req, res)=>{
+        const name = req.body.name;
+        const email = req.body.email;
+        const pic = req.files.image;
+        const picData = pic.data;
+        const encodedPic = picData.toString('base64');
+        const imageBuffer = Buffer.from(encodedPic, 'base64');
+        const doctor = {
+          name, 
+          email, 
+          image: imageBuffer
+        }
+        const result = await doctorsCollection.insertOne(doctor);
+        res.json(result);
       })
 
 
